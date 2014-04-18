@@ -73,9 +73,9 @@ public class TcpServer extends AbstractMessageHandler {
         SocketChannel channel = (SocketChannel) key.channel();
         channel.read(buffer);
         Message message = (Message) kryo.readClassAndObject(new Input(buffer.array()));
-        handle(message, (InetSocketAddress) channel.getRemoteAddress());
 
         LOG.info("Received {} from {}", message.getType(), channel.getRemoteAddress());
+        handle(message, (InetSocketAddress) channel.getRemoteAddress());
 
         buffer.clear();
     }
