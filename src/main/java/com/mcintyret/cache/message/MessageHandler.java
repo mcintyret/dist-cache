@@ -6,8 +6,8 @@ import com.mcintyret.cache.socket.SocketDetails;
  * User: tommcintyre
  * Date: 4/16/14
  */
-public interface MessageHandler {
+public interface MessageHandler<M extends Message> {
 
-    void handle(Message message, SocketDetails source);
+    void handle(M message, SocketDetails source);
 
 }

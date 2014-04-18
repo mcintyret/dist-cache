@@ -57,8 +57,9 @@ public class TcpServer extends AbstractServer {
     }
 
     @Override
-    protected void processMessage(Message message, SocketDetails socketDetails) {
-        informMessageHandlers(socketDetails, message);
+    protected Message processMessage(Message message, SocketDetails socketDetails) {
+        handle(message, socketDetails);
+        return message;
     }
 
     @Override

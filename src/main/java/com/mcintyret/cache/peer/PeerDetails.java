@@ -6,7 +6,7 @@ import com.mcintyret.cache.socket.SocketDetails;
  * User: tommcintyre
  * Date: 4/16/14
  */
-public class PeerDetails {
+public class PeerDetails implements Comparable<PeerDetails> {
 
     private Integer id;
 
@@ -36,5 +36,9 @@ public class PeerDetails {
         this.id = id;
     }
 
+    @Override
+    public int compareTo(PeerDetails o) {
+        return id.compareTo(o.id);
+    }
 }
 

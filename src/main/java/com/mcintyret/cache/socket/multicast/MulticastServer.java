@@ -67,10 +67,13 @@ public class MulticastServer extends AbstractServer {
     }
 
     @Override
-    protected void processMessage(Message message, SocketDetails socketDetails) {
+    protected Message processMessage(Message message, SocketDetails socketDetails) {
         MulticastMessage multicastMessage = (MulticastMessage) message;
         if (multicastMessage.getUniqueId() != UNIQUE_ID) {
-            informMessageHandlers(socketDetails, multicastMessage.getMessage());
+            handle(multicastMessage.getMessage(), socketDetails);
+            return multicastMessage.getMessage();
+        } else {
+            return null;
         }
     }
 

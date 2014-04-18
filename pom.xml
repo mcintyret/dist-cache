@@ -15,6 +15,18 @@
             <version>2.21</version>
         </dependency>
 
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>15.0</version>
+        </dependency>
+
+        <dependency>
+        	<groupId>org.eclipse.jetty</groupId>
+        	<artifactId>jetty-server</artifactId>
+        	<version>9.1.0.M0</version>
+        </dependency>
+
         <!-- Logging -->
         <dependency>
             <groupId>ch.qos.logback</groupId>

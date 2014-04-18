@@ -3,9 +3,7 @@ package com.mcintyret.cache.socket;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
-import com.mcintyret.cache.message.AddressedMessage;
-import com.mcintyret.cache.message.Message;
-import com.mcintyret.cache.message.MessageHandler;
+import com.mcintyret.cache.message.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +20,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * User: tommcintyre
  * Date: 4/16/14
  */
-public abstract class AbstractServer {
+public abstract class AbstractServer extends AbstractMessageHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractServer.class);
 
@@ -42,8 +40,6 @@ public abstract class AbstractServer {
 
     private final Queue<AddressedMessage> messageQueue = new ConcurrentLinkedQueue<>();
 
-    private final Collection<MessageHandler> messageHandlers = new ConcurrentLinkedQueue<>();
-
     protected final Selector selector;
 
     public AbstractServer() throws IOException {
@@ -60,10 +56,6 @@ public abstract class AbstractServer {
         } catch (ClosedChannelException e) {
             throw new IllegalStateException("Channel should not be closed!", e);
         }
-    }
-
-    public final void addMessageHandler(MessageHandler handler) {
-        messageHandlers.add(handler);
     }
 
     public final void sendMessage(Message message) {
@@ -99,7 +91,8 @@ public abstract class AbstractServer {
                     selector.selectedKeys().clear();
                     AddressedMessage msg;
                     while ((msg = messageQueue.poll()) != null) {
-                        LOG.info("{} sending message to {}", name, msg.getRecipient());
+                        Object recipient = msg.getRecipient() == null ? "everyone" : msg.getRecipient();
+                        LOG.info("{} sending {} to {}", name, msg.getMessage().getType(), recipient);
                         doSendMessage(msg);
                     }
                 }
@@ -118,21 +111,18 @@ public abstract class AbstractServer {
     protected final ByteBuffer buffer = ByteBuffer.allocate(10000);
 
     protected void handleSocketMessage(SocketDetails socketDetails) throws IOException {
-        System.out.println(new String(buffer.array()));
         Message message = (Message) kryo.readClassAndObject(new Input(buffer.array()));
 
-        processMessage(message, socketDetails);
+        Message processedMessage = processMessage(message, socketDetails);
+
+        if (processedMessage != null) {
+            LOG.info("{} received {} from {}", name, processedMessage.getType(), socketDetails);
+        }
 
         buffer.clear();
     }
 
-    protected abstract void processMessage(Message message, SocketDetails socketDetails);
-
-    protected void informMessageHandlers(SocketDetails socketDetails, Message message) {
-        for (MessageHandler messageHandler : messageHandlers) {
-            messageHandler.handle(message, socketDetails);
-        }
-    }
+    protected abstract Message processMessage(Message message, SocketDetails socketDetails);
 
     protected void sendMessageOnChannel(WritableByteChannel channel, Message message) throws IOException {
         Output output = new Output(buffer.array());

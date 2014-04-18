@@ -6,9 +6,11 @@ package com.mcintyret.cache.message;
  */
 public enum MessageType {
 
-    PUT,
+    CONFIRM_ID,
     GET,
+    GET_RESPONSE,
     GREET,
-    GREET_RESPONSE;
+    GREET_RESPONSE,
+    PUT;
 
 }
