@@ -1,7 +1,5 @@
 package com.mcintyret.cache.message;
 
-import com.mcintyret.cache.socket.SocketDetails;
-
 /**
  * User: tommcintyre
  * Date: 4/16/14

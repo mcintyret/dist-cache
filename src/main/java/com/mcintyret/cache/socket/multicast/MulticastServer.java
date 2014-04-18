@@ -1,26 +1,32 @@
 package com.mcintyret.cache.socket.multicast;
 
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
-import com.mcintyret.cache.message.AddressedMessage;
+import com.mcintyret.cache.message.AbstractMessageHandler;
+import com.mcintyret.cache.message.GreetMessage;
 import com.mcintyret.cache.message.Message;
-import com.mcintyret.cache.socket.AbstractServer;
-import com.mcintyret.cache.socket.SocketDetails;
+import com.mcintyret.cache.socket.SocketUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.*;
-import java.nio.channels.DatagramChannel;
-import java.nio.channels.MembershipKey;
-import java.nio.channels.SelectableChannel;
-import java.nio.channels.SelectionKey;
+import java.nio.ByteBuffer;
+import java.nio.channels.*;
+import java.util.Queue;
 import java.util.Random;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * User: tommcintyre
  * Date: 4/16/14
  */
-public class MulticastServer extends AbstractServer {
+public class MulticastServer extends AbstractMessageHandler {
 
-    public static final long UNIQUE_ID = new Random().nextLong(); // Good enough for now
+    private static final Logger LOG = LoggerFactory.getLogger(MulticastServer.class);
+
+    private static final long UNIQUE_ID = new Random().nextLong(); // Good enough for now
 
     private static final int GROUP_PORT = 4555;
     private static final String GROUP_ADDRESS = "225.4.5.6";
@@ -29,28 +35,53 @@ public class MulticastServer extends AbstractServer {
 
     private final DatagramChannel datagramChannel;
 
-    private final SocketDetails socketDetails;
+    private final SocketAddress socketAddress;
 
     private final DatagramSocket sendSocket = new DatagramSocket();
 
+    private final Selector selector;
+
+    private final Kryo kryo = new Kryo();
+
+    private final ByteBuffer buffer = ByteBuffer.allocate(1000);
+
+    private final Queue<Message> messageQueue = new ConcurrentLinkedQueue<>();
+
     public MulticastServer() throws IOException {
+        selector = Selector.open();
 
         this.datagramChannel = DatagramChannel.open(StandardProtocolFamily.INET)
                 .setOption(StandardSocketOptions.SO_REUSEADDR, true)
                 .bind(new InetSocketAddress(GROUP_PORT))
-                .setOption(StandardSocketOptions.IP_MULTICAST_IF, NETWORK_INTERFACE);
+                .setOption(StandardSocketOptions.IP_MULTICAST_IF, SocketUtils.NETWORK_INTERFACE);
+        datagramChannel.configureBlocking(false);
 //
-        MembershipKey key = datagramChannel.join(GROUP, NETWORK_INTERFACE);
+        MembershipKey key = datagramChannel.join(GROUP, SocketUtils.NETWORK_INTERFACE);
 
-        this.socketDetails = new SocketDetails((InetSocketAddress) datagramChannel.getLocalAddress());
-//        this.socketDetails = null;
+        this.socketAddress = datagramChannel.getLocalAddress();
     }
 
-    @Override
-    protected void handleReadableKey(SelectionKey key) throws IOException {
-        DatagramChannel channel = (DatagramChannel) key.channel();
-        SocketAddress remote = channel.receive(buffer);
-        handleSocketMessage(new SocketDetails((InetSocketAddress) remote));
+
+    public final void start() throws IOException {
+        LOG.info("Starting");
+        try {
+            datagramChannel.register(selector, SelectionKey.OP_READ);
+            new Thread(new SocketRunnable(), "Multicast Server Thread").start();
+        } catch (ClosedChannelException e) {
+            throw new IllegalStateException("Channel should not be closed!", e);
+        }
+    }
+
+    private void handleRead() throws IOException {
+        SocketAddress remote = datagramChannel.receive(buffer);
+        MulticastMessage message = (MulticastMessage) kryo.readClassAndObject(new Input(buffer.array()));
+
+        if (message.getUniqueId() != UNIQUE_ID) {
+            LOG.info("Received {} from {}", message.getType(), remote);
+            handle(message.getMessage(), (InetSocketAddress) remote);
+        }
+
+        buffer.clear();
     }
 
     private static InetAddress groupAddress() {
@@ -61,43 +92,54 @@ public class MulticastServer extends AbstractServer {
         }
     }
 
-    @Override
-    protected void handleAcceptableKey(SelectionKey key) {
-        throw new IllegalStateException("Should never happen!");
+
+    public SocketAddress getSocketAddress() {
+        return socketAddress;
     }
 
-    @Override
-    protected Message processMessage(Message message, SocketDetails socketDetails) {
-        MulticastMessage multicastMessage = (MulticastMessage) message;
-        if (multicastMessage.getUniqueId() != UNIQUE_ID) {
-            handle(multicastMessage.getMessage(), socketDetails);
-            return multicastMessage.getMessage();
-        } else {
-            return null;
+
+    private void doSendMessage(Message msg) throws IOException {
+        byte[] buf = new byte[1000];
+        Output output = new Output(buf);
+        kryo.writeClassAndObject(output, new MulticastMessage(msg, UNIQUE_ID));
+        DatagramPacket packet = new DatagramPacket(buf, buf.length, GROUP, GROUP_PORT);
+        sendSocket.send(packet);
+    }
+
+    public void sendMessage(Message message) {
+        messageQueue.add(message);
+        selector.wakeup();
+    }
+
+    private final class SocketRunnable implements Runnable {
+        @Override
+        public void run() {
+            try {
+                while (true) {
+                    selector.select();
+                    for (SelectionKey key : selector.selectedKeys()) {
+                        if (key.isReadable()) {
+                            handleRead();
+                        } else {
+                            throw new IllegalStateException("Should only be read");
+                        }
+                    }
+                    selector.selectedKeys().clear();
+                    Message msg;
+                    while ((msg = messageQueue.poll()) != null) {
+                        LOG.info("Sending {} to everyone", msg.getType());
+                        doSendMessage(msg);
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 
-    @Override
-    public SocketDetails getSocketDetails() {
-        return socketDetails;
-    }
-
-    @Override
-    protected int getOperations() {
-        return SelectionKey.OP_READ;
-    }
-
-    @Override
-    protected SelectableChannel getChannel() {
-        return datagramChannel;
-    }
-
-    @Override
-    protected void doSendMessage(AddressedMessage msg) throws IOException {
-        byte[] buf = new byte[1000];
-        Output output = new Output(buf);
-        kryo.writeClassAndObject(output, new MulticastMessage(msg.getMessage(), UNIQUE_ID));
-        DatagramPacket packet = new DatagramPacket(buf, buf.length, GROUP, GROUP_PORT);
-        sendSocket.send(packet);
+    public void close() throws IOException {
+        datagramChannel.close();
+        sendSocket.close();
+        selector.close();
     }
 }

@@ -1,6 +1,6 @@
 package com.mcintyret.cache.message;
 
-import com.mcintyret.cache.socket.SocketDetails;
+import java.net.InetSocketAddress;
 
 /**
  * User: tommcintyre
@@ -8,6 +8,6 @@ import com.mcintyret.cache.socket.SocketDetails;
  */
 public interface MessageHandler<M extends Message> {
 
-    void handle(M message, SocketDetails source);
+    void handle(M message, InetSocketAddress source);
 
 }

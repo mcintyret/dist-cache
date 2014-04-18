@@ -5,11 +5,11 @@ import com.mcintyret.cache.message.*;
 import com.mcintyret.cache.peer.PeerChangeListener;
 import com.mcintyret.cache.peer.PeerDetails;
 import com.mcintyret.cache.peer.Peers;
-import com.mcintyret.cache.socket.SocketDetails;
 import com.mcintyret.cache.socket.tcp.TcpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,25 +29,19 @@ public class Cache implements PeerChangeListener {
 
     private final Map<String, SettableFuture<byte[]>> awaiting = new HashMap<>();
 
-    private final List<PeerDetails> peers;
-
-    private final PeerDetails me;
-
     private final TcpServer tcpServer;
 
-    public Cache(Peers peers, final TcpServer tcpServer) {
-        this(peers.getPeers(), peers.getMe(), tcpServer);
-        peers.addPeerChangeListener(this);
-    }
+    private final Peers peers;
 
-    public Cache(List<PeerDetails> peers, PeerDetails me, final TcpServer tcpServer) {
+    private PeerDetails me;
+
+    public Cache(Peers peers, final TcpServer tcpServer) {
         this.peers = peers;
-        this.me = me;
         this.tcpServer = tcpServer;
 
         tcpServer.addMessageHandler(MessageType.GET_RESPONSE, new MessageHandler<GetResponseMessage>() {
             @Override
-            public void handle(GetResponseMessage grm, SocketDetails source) {
+            public void handle(GetResponseMessage grm, InetSocketAddress source) {
 
                 SettableFuture<byte[]> future;
                 synchronized (awaiting) {
@@ -61,9 +55,9 @@ public class Cache implements PeerChangeListener {
 
         tcpServer.addMessageHandler(MessageType.GET, new MessageHandler<GetMessage>() {
             @Override
-            public void handle(GetMessage get, SocketDetails source) {
+            public void handle(GetMessage get, InetSocketAddress source) {
                 String key = get.getKey();
-                LOG.info("Serving remote get request for '{}' from peer {}", key, source);
+                LOG.info("Serving remote get request for key '{}' from peer {}", key, source);
                 byte[] result = myCache.get(key);
                 tcpServer.sendMessage(new GetResponseMessage(key, result), source);
             }
@@ -71,7 +65,8 @@ public class Cache implements PeerChangeListener {
 
         tcpServer.addMessageHandler(MessageType.PUT, new MessageHandler<PutMessage>() {
             @Override
-            public void handle(PutMessage put, SocketDetails source) {
+            public void handle(PutMessage put, InetSocketAddress source) {
+                LOG.info("Serving remote put request for key '{}' from peer {}", put.getKey(), source);
                 byte[] oldVal = myCache.put(put.getKey(), put.getData());
 
                 if (put.isAndGet()) {
@@ -89,8 +84,8 @@ public class Cache implements PeerChangeListener {
             return myCache.get(key);
         } else {
             Future<byte[]> future = getFuture(key);
-            LOG.info("Requesting value for '{}' from peer at {}", key, peer.getTcpSocketDetails());
-            tcpServer.sendMessage(new GetMessage(key), peer.getTcpSocketDetails());
+            LOG.info("Requesting value for '{}' from peer at {}", key, peer.getTcpSocketAddress());
+            tcpServer.sendMessage(new GetMessage(key), peer.getTcpSocketAddress());
             return future.get();
         }
     }
@@ -109,26 +104,28 @@ public class Cache implements PeerChangeListener {
 
     public void put(String key, byte[] val) {
         PeerDetails peerDetails = getPeerDetails(key);
-        if (peerDetails == me) {
+        if (peerDetails == me()) {
             LOG.info("Storing value for '{}' in local cache", key);
             myCache.put(key, val);
         } else {
-            tcpServer.sendMessage(new PutMessage(key, val, false), peerDetails.getTcpSocketDetails());
+            LOG.info("Sending value for '{}' in to peer at {}", key, peerDetails.getTcpSocketAddress());
+            tcpServer.sendMessage(new PutMessage(key, val, false), peerDetails.getTcpSocketAddress());
         }
     }
 
     public byte[] putAndGet(String key, byte[] val) throws ExecutionException, InterruptedException {
         PeerDetails peerDetails = getPeerDetails(key);
-        if (peerDetails == me) {
+        if (peerDetails == me()) {
             return myCache.put(key, val);
         } else {
             Future<byte[]> future = getFuture(key);
-            tcpServer.sendMessage(new PutMessage(key, val, true), peerDetails.getTcpSocketDetails());
+            tcpServer.sendMessage(new PutMessage(key, val, true), peerDetails.getTcpSocketAddress());
             return future.get();
         }
     }
 
     private PeerDetails getPeerDetails(String key) {
+        List<PeerDetails> peers = this.peers.getConfirmedPeers();
         int hash = key.hashCode() % peers.size();
         return peers.get(hash);
     }
@@ -136,7 +133,17 @@ public class Cache implements PeerChangeListener {
     @Override
     public void onChange(Peers peers) {
         if (!myCache.isEmpty()) {
-            // Redistribute!
+            // TODO: Redistribute!
         }
+    }
+
+    private PeerDetails me() {
+        if (me == null) {
+            me = peers.getMe();
+            if (me == null) {
+                throw new IllegalStateException("Can't use caching while still initializing ID");
+            }
+        }
+        return me;
     }
 }

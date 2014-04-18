@@ -1,7 +1,6 @@
 package com.mcintyret.cache.message;
 
-import com.mcintyret.cache.socket.SocketDetails;
-
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -21,7 +20,7 @@ public class AggregatingMessageHandler<M extends Message> implements MessageHand
     }
 
     @Override
-    public void handle(M message, SocketDetails source) {
+    public void handle(M message, InetSocketAddress source) {
         for (MessageHandler<M> messageHandler : messageHandlers) {
             messageHandler.handle(message, source);
         }

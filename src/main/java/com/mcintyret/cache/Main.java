@@ -5,13 +5,14 @@ import com.mcintyret.cache.http.HttpServer;
 import com.mcintyret.cache.message.*;
 import com.mcintyret.cache.peer.PeerDetails;
 import com.mcintyret.cache.peer.Peers;
-import com.mcintyret.cache.socket.SocketDetails;
 import com.mcintyret.cache.socket.multicast.MulticastServer;
 import com.mcintyret.cache.socket.tcp.TcpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -41,7 +42,19 @@ public class Main {
         tcpServer.start();
         multicastServer.start();
 
-        peers = new Peers(new PeerDetails(tcpServer.getSocketDetails()));
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
+            public void run() {
+                try {
+                    tcpServer.close();
+                    multicastServer.close();
+                } catch (IOException e) {
+                    LOG.error("Error shutting down", e);
+                }
+            }
+        });
+
+        peers = new Peers(tcpServer.getSocketAddress());
 
         this.cache = new Cache(peers, tcpServer);
 
@@ -49,35 +62,39 @@ public class Main {
         tcpServer.addMessageHandler(MessageType.GREET_RESPONSE, new GreetResponseMessageHandler());
         tcpServer.addMessageHandler(MessageType.CONFIRM_ID, new ConfirmIdHandler());
 
-        multicastServer.sendMessage(new GreetMessage(tcpServer.getSocketDetails().getPort()));
+        multicastServer.sendMessage(new GreetMessage(tcpServer.getSocketAddress().getPort()));
+
+
     }
 
     private class ConfirmIdHandler implements MessageHandler<ConfirmIdMessage> {
 
         @Override
-        public void handle(ConfirmIdMessage message, SocketDetails source) {
-            peers.addPeer(new PeerDetails(message.getId(), source));
+        public void handle(ConfirmIdMessage message, InetSocketAddress source) {
+            peers.confirmPeer(source, message.getId());
         }
     }
 
     private class GreetMessageHandler implements MessageHandler<GreetMessage> {
         @Override
-        public void handle(GreetMessage message, SocketDetails source) {
-            SocketDetails recipient = new SocketDetails(source.getInetAddress(), message.getPort());
+        public void handle(GreetMessage message, InetSocketAddress source) {
+            SocketAddress recipient = new InetSocketAddress(source.getAddress(), message.getPort());
 
-            tcpServer.sendMessage(new GreetResponseMessage(peers.getMe().getId(), peers.getRemotePeersCount()), recipient);
+            peers.addPendingPeer(recipient);
+
+            tcpServer.sendMessage(new GreetResponseMessage(peers.getMyId(), peers.getTotalPeersCount() - 1), recipient);
         }
     }
 
+    private final ScheduledExecutorService exec = Executors.newScheduledThreadPool(1);
+
     private class GreetResponseMessageHandler implements MessageHandler<GreetResponseMessage> {
 
-        private final ScheduledExecutorService exec = Executors.newScheduledThreadPool(1);
+        private final long maxTimeMillis = 5 * 1000;
 
-        private final long maxTimeMillis = 10 * 1000;
+        private final Map<SocketAddress, PeerDetails> respondedPeers = new HashMap<>();
 
-        private Map<SocketDetails, PeerDetails> respondedPeers = new HashMap<>();
-
-        private List<SocketDetails> noIdSocketDetails = new ArrayList<>();
+        private final List<SocketAddress> noIdSocketDetails = new ArrayList<>();
 
         private boolean done = false;
 
@@ -89,23 +106,26 @@ public class Main {
             exec.schedule(new Runnable() {
                 @Override
                 public void run() {
-                    completeGreeting();
+                    completeGreeting(true);
                 }
             }, maxTimeMillis, TimeUnit.MILLISECONDS);
         }
 
-        private synchronized void completeGreeting() {
+        private synchronized void completeGreeting(boolean fromTimer) {
             if (!done) {
+                if (fromTimer) {
+                    LOG.info("Choosing id after timeout of {}ms", maxTimeMillis);
+                }
                 int myId = -1;
                 if (noIdSocketDetails.isEmpty()) {
                     myId = maxId + 1;
                 } else {
-                    noIdSocketDetails.add(peers.getMe().getTcpSocketDetails());
+                    noIdSocketDetails.add(peers.getMyAddress());
                     Collections.sort(noIdSocketDetails, SOCKET_DETAILS_COMPARATOR);
 
-                    for (SocketDetails sd : noIdSocketDetails) {
+                    for (SocketAddress address : noIdSocketDetails) {
                         maxId++;
-                        if (sd == peers.getMe().getTcpSocketDetails()) {
+                        if (address == peers.getMyAddress()) {
                             myId = maxId;
                             break;
                         }
@@ -114,7 +134,7 @@ public class Main {
                 if (myId == -1) {
                     throw new AssertionError("Couldn't come up with an ID for myself!");
                 }
-                peers.getMe().setId(myId);
+                peers.confirmPeer(peers.getMyAddress(), myId);
                 LOG.info("Set my id to {}", myId);
                 if (myId == 1) {
                     LOG.info("I am the magic number 1, therefore I am starting the HttpServer");
@@ -125,52 +145,54 @@ public class Main {
                     }
                 }
 
-                for (int i = 0; i < 10; i++) {
-                    for (PeerDetails peer : respondedPeers.values()) {
-                        tcpServer.sendMessage(new ConfirmIdMessage(myId), peer.getTcpSocketDetails());
-                    }
+                for (PeerDetails peer : respondedPeers.values()) {
+                    tcpServer.sendMessage(new ConfirmIdMessage(myId), peer.getTcpSocketAddress());
                 }
 
-                peers.addPeers(respondedPeers.values());
+                peers.addConfirmedPeers(respondedPeers.values());
 
                 done = true;
             }
         }
 
         @Override
-        public synchronized void handle(GreetResponseMessage grm, SocketDetails source) {
+        public synchronized void handle(GreetResponseMessage grm, InetSocketAddress source) {
             if (done) {
                 // TODO: better handling of late responses?
+                //- probably want to just start again?
                 LOG.warn("Shouldn't be receiving GreetResponseMessages now, from {}", source);
             } else {
                 expectedPeers = Math.max(expectedPeers, grm.getKnownTotalPeers());
                 Integer id = grm.getId();
 
-                PeerDetails newPeerDetails = new PeerDetails(source);
                 if (id == null) {
                     noIdSocketDetails.add(source);
                 } else {
                     maxId = Math.max(maxId, id);
-                    newPeerDetails.setId(id);
+                    respondedPeers.put(source, new PeerDetails(id, source));
                 }
 
-                respondedPeers.put(source, newPeerDetails);
+                int responded = respondedPeers.size() + noIdSocketDetails.size();
 
-                if (respondedPeers.size() == expectedPeers) {
-                    completeGreeting();
+                LOG.info("Expecting {} peers, of which {} have responded", expectedPeers, responded);
+
+                if (responded == expectedPeers) {
+                    completeGreeting(false);
                 }
             }
         }
     }
 
-    private static final Comparator<SocketDetails> SOCKET_DETAILS_COMPARATOR = new Comparator<SocketDetails>() {
+    private static final Comparator<SocketAddress> SOCKET_DETAILS_COMPARATOR = new Comparator<SocketAddress>() {
         @Override
-        public int compare(SocketDetails o1, SocketDetails o2) {
-            int comp = o1.getInetAddress().getHostAddress().compareTo(o2.getInetAddress().getHostAddress());
+        public int compare(SocketAddress o1, SocketAddress o2) {
+            InetSocketAddress s1 = (InetSocketAddress) o1;
+            InetSocketAddress s2 = (InetSocketAddress) o2;
+            int comp = s1.getAddress().getHostAddress().compareTo(s2.getAddress().getHostAddress());
             if (comp != 0) {
                 return comp;
             } else {
-                return o2.getPort() - o1.getPort();
+                return s2.getPort() - s1.getPort();
             }
         }
     };

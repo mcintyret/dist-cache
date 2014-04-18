@@ -1,7 +1,6 @@
 package com.mcintyret.cache.message;
 
-import com.mcintyret.cache.socket.SocketDetails;
-
+import java.net.InetSocketAddress;
 import java.util.EnumMap;
 import java.util.Map;
 
@@ -25,7 +24,7 @@ public class AbstractMessageHandler implements MessageHandler {
     }
 
     @Override
-    public void handle(Message message, SocketDetails source) {
+    public void handle(Message message, InetSocketAddress source) {
         MessageHandler handler = handlerMap.get(message.getType());
         if (handler != null) {
             handler.handle(message, source);

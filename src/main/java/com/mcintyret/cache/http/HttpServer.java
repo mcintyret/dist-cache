@@ -60,7 +60,7 @@ public class HttpServer {
         @Override
         public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws IOException, ServletException {
             baseRequest.setHandled(true);
-            LOG.info("Handling get request");
+            LOG.debug("Handling get request");
 
             String key = request.getParameter("key");
             if (key == null) {
@@ -85,7 +85,7 @@ public class HttpServer {
         @Override
         public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws IOException, ServletException {
             baseRequest.setHandled(true);
-            LOG.info("Handling put request");
+            LOG.debug("Handling put request");
 
             String key = request.getParameter("key");
             if (key == null) {

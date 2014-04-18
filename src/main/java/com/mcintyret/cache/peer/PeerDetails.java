@@ -1,6 +1,6 @@
 package com.mcintyret.cache.peer;
 
-import com.mcintyret.cache.socket.SocketDetails;
+import java.net.SocketAddress;
 
 /**
  * User: tommcintyre
@@ -8,37 +8,26 @@ import com.mcintyret.cache.socket.SocketDetails;
  */
 public class PeerDetails implements Comparable<PeerDetails> {
 
-    private Integer id;
+    private final int id;
 
-    private final SocketDetails tcpSocketDetails;
+    private final SocketAddress tcpSocketAddress;
 
-    public PeerDetails(SocketDetails tcpSocketDetails) {
-        this.tcpSocketDetails = tcpSocketDetails;
-    }
-
-    public PeerDetails(int id, SocketDetails tcpSocketDetails) {
+    public PeerDetails(int id, SocketAddress tcpSocketAddress) {
         this.id = id;
-        this.tcpSocketDetails = tcpSocketDetails;
+        this.tcpSocketAddress = tcpSocketAddress;
     }
 
     public Integer getId() {
         return id;
     }
 
-    public SocketDetails getTcpSocketDetails() {
-        return tcpSocketDetails;
-    }
-
-    public void setId(int id) {
-        if (this.id != null) {
-            throw new IllegalStateException("ID already set to " + this.id + " but trying to set it again to " + id);
-        }
-        this.id = id;
+    public SocketAddress getTcpSocketAddress() {
+        return tcpSocketAddress;
     }
 
     @Override
     public int compareTo(PeerDetails o) {
-        return id.compareTo(o.id);
+        return o.id - id;
     }
 }
 
