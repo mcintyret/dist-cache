@@ -4,7 +4,6 @@ import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 import com.mcintyret.cache.message.AbstractMessageHandler;
-import com.mcintyret.cache.message.GreetMessage;
 import com.mcintyret.cache.message.Message;
 import com.mcintyret.cache.socket.SocketUtils;
 import org.slf4j.Logger;
@@ -13,7 +12,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.*;
 import java.nio.ByteBuffer;
-import java.nio.channels.*;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.DatagramChannel;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.util.Queue;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -35,8 +37,6 @@ public class MulticastServer extends AbstractMessageHandler {
 
     private final DatagramChannel datagramChannel;
 
-    private final SocketAddress socketAddress;
-
     private final DatagramSocket sendSocket = new DatagramSocket();
 
     private final Selector selector;
@@ -55,15 +55,12 @@ public class MulticastServer extends AbstractMessageHandler {
                 .bind(new InetSocketAddress(GROUP_PORT))
                 .setOption(StandardSocketOptions.IP_MULTICAST_IF, SocketUtils.NETWORK_INTERFACE);
         datagramChannel.configureBlocking(false);
-//
-        MembershipKey key = datagramChannel.join(GROUP, SocketUtils.NETWORK_INTERFACE);
-
-        this.socketAddress = datagramChannel.getLocalAddress();
     }
 
 
     public final void start() throws IOException {
         LOG.info("Starting");
+        datagramChannel.join(GROUP, SocketUtils.NETWORK_INTERFACE);
         try {
             datagramChannel.register(selector, SelectionKey.OP_READ);
             new Thread(new SocketRunnable(), "Multicast Server Thread").start();
@@ -90,11 +87,6 @@ public class MulticastServer extends AbstractMessageHandler {
         } catch (UnknownHostException e) {
             throw new IllegalStateException("Unable to find Multicast address");
         }
-    }
-
-
-    public SocketAddress getSocketAddress() {
-        return socketAddress;
     }
 
 
