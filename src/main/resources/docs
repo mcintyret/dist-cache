@@ -1,0 +1,19 @@
+Assumptions
+1) Every node will be connected to every other
+2) Data redistribution can only happen when every node agrees the IDs
+- a new node can join while a redistribution is going on; it will then be interrupted and restarted when the
+IDs are settled again
+
+Startup process:
+1) New node starts up and sends greet message to Multicast socket
+- special case - what if this is the first node??
+- tells everyone it's tcp port
+2) Other nodes respond with
+- what they think this new node's ID should be
+- their own ID (null if not set yet)
+- the port on which their TCP server is listening (assume it's the same IP)
+3) New node picks highest id as it's id
+- if there are any nulls, or a greet comes in to a node that doesn't know it's ID yet, all involved nodes
+know that this situation is occuring. They can each assign an ID unambiguously by ordering by IP address and then port.
+
+
