@@ -3,6 +3,8 @@ package com.mcintyret.cache.socket.tcp;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
+import com.esotericsoftware.kryo.io.UnsafeInput;
+import com.esotericsoftware.kryo.io.UnsafeOutput;
 import com.mcintyret.cache.message.AbstractMessageHandler;
 import com.mcintyret.cache.message.Message;
 import com.mcintyret.cache.socket.SocketUtils;
@@ -72,7 +74,7 @@ public class TcpServer extends AbstractMessageHandler {
     private void handleRead(SelectionKey key) throws IOException {
         SocketChannel channel = (SocketChannel) key.channel();
         channel.read(buffer);
-        Message message = (Message) kryo.readClassAndObject(new Input(buffer.array()));
+        Message message = (Message) kryo.readClassAndObject(new UnsafeInput(buffer.array()));
 
         LOG.info("Received {} from {}", message.getType(), channel.getRemoteAddress());
         handle(message, (InetSocketAddress) channel.getRemoteAddress());
@@ -99,7 +101,7 @@ public class TcpServer extends AbstractMessageHandler {
         while ((message = messageQueue.poll()) != null) {
             LOG.info("Sending {} to {}", message.getType(), SocketAddress);
             SocketChannel channel = (SocketChannel) key.channel();
-            Output output = new Output(buffer.array());
+            Output output = new UnsafeOutput(buffer.array());
             kryo.writeClassAndObject(output, message);
 
             channel.write(buffer);

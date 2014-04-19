@@ -3,6 +3,8 @@ package com.mcintyret.cache.socket.multicast;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
+import com.esotericsoftware.kryo.io.UnsafeInput;
+import com.esotericsoftware.kryo.io.UnsafeOutput;
 import com.mcintyret.cache.message.AbstractMessageHandler;
 import com.mcintyret.cache.message.Message;
 import com.mcintyret.cache.socket.SocketUtils;
@@ -71,7 +73,7 @@ public class MulticastServer extends AbstractMessageHandler {
 
     private void handleRead() throws IOException {
         SocketAddress remote = datagramChannel.receive(buffer);
-        MulticastMessage message = (MulticastMessage) kryo.readClassAndObject(new Input(buffer.array()));
+        MulticastMessage message = (MulticastMessage) kryo.readClassAndObject(new UnsafeInput(buffer.array()));
 
         if (message.getUniqueId() != UNIQUE_ID) {
             LOG.info("Received {} from {}", message.getType(), remote);
@@ -92,7 +94,7 @@ public class MulticastServer extends AbstractMessageHandler {
 
     private void doSendMessage(Message msg) throws IOException {
         byte[] buf = new byte[1000];
-        Output output = new Output(buf);
+        Output output = new UnsafeOutput(buf);
         kryo.writeClassAndObject(output, new MulticastMessage(msg, UNIQUE_ID));
         DatagramPacket packet = new DatagramPacket(buf, buf.length, GROUP, GROUP_PORT);
         sendSocket.send(packet);
